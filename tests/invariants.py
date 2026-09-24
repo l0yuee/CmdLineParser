@@ -28,10 +28,17 @@ def check_terms(token) -> None:
         assert term.value
         assert term.rules and set(term.rules) <= _RULE_IDS
         assert len(term.rules) == len(set(term.rules))
+        assert isinstance(term.noise, bool)
         if term.kind == KIND_SUBWORD:
             assert any(term.value in source for source in allowed)
         else:
             assert term.value in allowed
+    # N-NOISE-001 作用于整个片段：同一片段的词项要么全是噪声，要么全不是；
+    # 且噪声片段不再产生子词。
+    flags = {term.noise for term in token.terms}
+    assert len(flags) <= 1
+    if flags == {True}:
+        assert all(term.kind != KIND_SUBWORD for term in token.terms)
     if base:
         assert token.terms == [] or token.terms[0].value == base
     else:
@@ -104,6 +111,10 @@ def check_result(text: str, result, options: AnalyzerOptions | None = None) -> N
         assert 0 <= start < stop <= len(parent_text)
         assert view.status in {"complete", "partial"}
         assert view.mapping == "range"
+        assert view.confidence in {"high", "medium", "low"}
+        assert all(isinstance(item, str) and item for item in view.evidence)
+        # 有证据必然定级 high：分级顺序规定证据优先于形态。
+        assert not view.evidence or view.confidence == "high"
         assert view.text
         check_layer(view.text, len(view.text), view.tokens, view.groups, view.symbols, complete=complete)
         total_items += len(view.tokens) + len(view.groups) + len(view.symbols)
@@ -120,6 +131,23 @@ def check_result(text: str, result, options: AnalyzerOptions | None = None) -> N
     assert result.notices[len(ordinary) :] == limit_notices
     for token in result.tokens:
         assert len(token.terms) <= options.max_terms_per_token
+
+    # M-OBFUS-001：度量恒定存在，占比落在 [0,1]，触发项是度量名的子集。
+    obfuscation = processing.obfuscation
+    assert set(obfuscation) == {
+        "symbol_ratio",
+        "case_toggles",
+        "charcode_coverage",
+        "quote_chars",
+        "concat_segments",
+        "triggered",
+    }
+    assert 0.0 <= obfuscation["symbol_ratio"] <= 1.0
+    assert 0.0 <= obfuscation["charcode_coverage"] <= 1.0
+    assert set(obfuscation["triggered"]) <= set(obfuscation) - {"triggered"}
+    suspected = [n for n in result.notices if n.code == "OBFUSCATION_SUSPECTED"]
+    # 无触发项时一定没有通知；有触发项时至多一条（可能被 max_notices 挡下）。
+    assert len(suspected) <= (1 if obfuscation["triggered"] else 0)
 
     data = result.to_dict()
     assert json.loads(json.dumps(data, ensure_ascii=False)) == data

@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 Span = tuple[int, int]
 
@@ -35,14 +35,24 @@ def _span(span: Span | None) -> list[int] | None:
 
 @dataclass(slots=True)
 class Term:
-    """一个搜索词项。同一 Token 的全部词项共享该 Token 的位置。"""
+    """一个搜索词项。同一 Token 的全部词项共享该 Token 的位置。
+
+    ``noise`` 表示该词项所在的片段完全落在高置信混淆区域之内（``N-NOISE-001``）。
+    这类词项照常输出——降权只交给消费方，分析器不替消费方丢弃检索面。
+    """
 
     value: str
     kind: str
     rules: list[str]
+    noise: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {"value": self.value, "kind": self.kind, "rules": list(self.rules)}
+        return {
+            "value": self.value,
+            "kind": self.kind,
+            "rules": list(self.rules),
+            "noise": self.noise,
+        }
 
 
 @dataclass(slots=True)
@@ -124,6 +134,10 @@ class DecodedView:
 
     ``source_span`` 位于父视图坐标系中（``parent_view_id`` 为 None 时即原文），
     只做整段区间映射，不声明逐字符对应关系。
+
+    ``confidence`` 是"这段文本确实是该编码"的证据强度，不是恶意程度评分；
+    ``evidence`` 列出触发提示规则的上下文特征词。低置信视图同样输出，
+    由检索系统按需过滤。
     """
 
     id: str
@@ -142,6 +156,8 @@ class DecodedView:
     groups: list[Group] = field(default_factory=list)
     symbols: list[Symbol] = field(default_factory=list)
     mapping: str = "range"
+    confidence: str = "high"
+    evidence: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +172,8 @@ class DecodedView:
             "charset": self.charset,
             "status": self.status,
             "hint": self.hint,
+            "confidence": self.confidence,
+            "evidence": list(self.evidence),
             "mapping": self.mapping,
             "text": self.text,
             "tokens": [token.to_dict() for token in self.tokens],
@@ -166,7 +184,11 @@ class DecodedView:
 
 @dataclass(slots=True)
 class Processing:
-    """实际扫描范围、规则版本、资源使用与受限情况。"""
+    """实际扫描范围、规则版本、资源使用、受限情况与混淆度量。
+
+    ``obfuscation`` 是描述性的记录级度量（``M-OBFUS-001``），不是评分，
+    也不声明恶意概率；无混淆迹象时各计数为 0、占比为空。
+    """
 
     rules_version: str
     input_length: int
@@ -176,6 +198,7 @@ class Processing:
     limited: bool
     limits: list[dict[str, Any]]
     stats: dict[str, int]
+    obfuscation: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -187,6 +210,7 @@ class Processing:
             "limited": self.limited,
             "limits": [dict(item) for item in self.limits],
             "stats": dict(self.stats),
+            "obfuscation": dict(self.obfuscation),
         }
 
 

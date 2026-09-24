@@ -21,7 +21,14 @@ import pytest
 from invariants import check_result
 
 from cmdline_parser import AnalyzerOptions, analyze
-from cmdline_parser.decoders import DecodeSuccess, base64_decoder, escape_decoder, percent_decoder
+from cmdline_parser.decoders import (
+    DecodeSuccess,
+    base64_decoder,
+    charcode_decoder,
+    concat_decoder,
+    escape_decoder,
+    percent_decoder,
+)
 
 HERE = Path(__file__).resolve().parent
 CASES_PATH = HERE / "fixtures" / "cases.jsonl"
@@ -43,6 +50,9 @@ CATEGORIES = {
     "base64",
     "percent",
     "escape",
+    "charcode",
+    "concat",
+    "obfuscation",
     "partial",
     "misdetection",
     "mixed",
@@ -74,6 +84,8 @@ _DECODE = {
     "percent": percent_decoder.decode,
     "hex_escape": escape_decoder.decode_hex,
     "unicode_escape": escape_decoder.decode_unicode,
+    "charcode-decimal": charcode_decoder.decode,
+    "concat": concat_decoder.decode,
 }
 _UNRESERVED = frozenset(string.ascii_letters + string.digits + "-._~")
 

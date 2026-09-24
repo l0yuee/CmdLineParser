@@ -21,12 +21,20 @@ MIN_PRINTABLE_RATIO = 0.9
 
 @dataclass(frozen=True, slots=True)
 class DecodeSuccess:
+    """一次成功的解码。
+
+    ``confidence`` 描述"这段文本确实是该编码"的证据强度，只有证据分级的
+    解码器（D-CHARCODE-001）会给出 ``medium`` / ``low``；形态约束本身足够
+    严格的解码器保持 ``high``。低置信结果同样产生视图，由调用方按需过滤。
+    """
+
     text: str
     status: str
     encoding: str
     charset: str
     rule: str
     byte_count: int
+    confidence: str = "high"
 
 
 @dataclass(frozen=True, slots=True)

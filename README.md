@@ -123,7 +123,7 @@ cmdline-parser --text 'netstat.exe -ano'
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "raw": "ne^tstat -ano | fi^ndstr \"443",
   "tokens": [
     {
@@ -131,8 +131,8 @@ cmdline-parser --text 'netstat.exe -ano'
       "span": [0, 8],
       "position": 0,
       "terms": [
-        {"value": "ne^tstat", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"]},
-        {"value": "netstat", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"]},
+        {"value": "ne^tstat", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"], "noise": false},
+        {"value": "netstat", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"], "noise": false},
         ...
 ```
 
@@ -156,7 +156,7 @@ PowerShell 中设置环境变量：`$env:HYPOTHESIS_PROFILE = "ci"; python -m py
 
 测试组成：
 
-- `tests/fixtures/cases.jsonl`：人工审核的固定样例（100 余条，覆盖规划列出的 20 个类别），
+- `tests/fixtures/cases.jsonl`：人工审核的固定样例（110 余条，覆盖规划列出的 23 个类别），
   由 `tests/test_fixtures.py` 加载；编码载荷在加载时由无害文本（如 `Write-Output hello`）生成。
 - `tests/test_properties.py`：基于 Hypothesis 的性质测试（原文切片、确定性、来源追溯、截断前缀稳定、
   不补全、资源上限等），公共断言在 `tests/invariants.py`。

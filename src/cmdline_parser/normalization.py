@@ -68,12 +68,13 @@ def extract_subwords(value: str) -> list[str]:
 class _TermSet:
     """按首次出现顺序合并同值词项，保留首个来源的类别并合并来源规则。"""
 
-    __slots__ = ("_terms", "_index", "_max", "limited")
+    __slots__ = ("_terms", "_index", "_max", "_noise", "limited")
 
-    def __init__(self, max_terms: int) -> None:
+    def __init__(self, max_terms: int, *, noise: bool = False) -> None:
         self._terms: list[Term] = []
         self._index: dict[str, Term] = {}
         self._max = max_terms
+        self._noise = noise
         self.limited = False
 
     def add(self, value: str, kind: str, rules: tuple[str, ...]) -> None:
@@ -88,7 +89,7 @@ class _TermSet:
         if len(self._terms) >= self._max:
             self.limited = True
             return
-        term = Term(value, kind, list(rules))
+        term = Term(value, kind, list(rules), self._noise)
         self._terms.append(term)
         self._index[value] = term
 
@@ -97,15 +98,25 @@ class _TermSet:
         return self._terms
 
 
-def build_terms(raw: str, *, subwords: bool = True, max_terms: int = 32) -> tuple[list[Term], bool]:
+def build_terms(
+    raw: str,
+    *,
+    subwords: bool = True,
+    max_terms: int = 32,
+    noise: bool = False,
+) -> tuple[list[Term], bool]:
     """为一个基础片段生成搜索词项，返回 ``(terms, limited)``。
 
     输出顺序固定：原始词、折叠词、混淆别名（及其折叠形式）、子词。
+
+    ``noise`` 为真表示该片段完全落在高置信混淆区域之内（``N-NOISE-001``）：
+    此时不生成子词——区域内的 ``\\w+`` 片段是码串被非边界分隔符切碎的残余，
+    检索价值低；原始词与折叠词照常生成，只是整体标记为噪声。
     """
     base = base_term(raw)
     if not base:
         return [], False
-    terms = _TermSet(max_terms)
+    terms = _TermSet(max_terms, noise=noise)
     folded = base.casefold()
     terms.add(base, KIND_ORIGINAL, (RULE_BASE,))
     terms.add(folded, KIND_CASEFOLD, (RULE_CASEFOLD,))
@@ -119,7 +130,7 @@ def build_terms(raw: str, *, subwords: bool = True, max_terms: int = 32) -> tupl
         sources.append((alias, (RULE_DEOBF,)))
         sources.append((alias_folded, (RULE_DEOBF, RULE_CASEFOLD)))
 
-    if subwords:
+    if subwords and not noise:
         for value, chain in sources:
             for part in extract_subwords(value):
                 terms.add(part, KIND_SUBWORD, chain + (RULE_SUBWORD,))

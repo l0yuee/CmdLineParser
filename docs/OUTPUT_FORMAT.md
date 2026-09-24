@@ -1,4 +1,4 @@
-# 输出格式（schema_version = "1"）
+# 输出格式（schema_version = "2"）
 
 本文档说明 `analyze()` 返回的 `AnalysisResult.to_dict()` 以及 CLI 输出的 JSON 结构。
 规则 ID 的含义见 [RULES.md](RULES.md)。
@@ -22,7 +22,7 @@
 
 | 字段 | 类型 | 内容 |
 |---|---|---|
-| `schema_version` | string | 首版固定为 `"1"` |
+| `schema_version` | string | 当前为 `"2"`；见第 12 节的变更记录 |
 | `raw` | string | 完整输入原文（即使只扫描了其中一部分） |
 | `tokens` | array | 根层基础词项，见第 3 节 |
 | `groups` | array | 根层引号分组，见第 4 节 |
@@ -41,10 +41,10 @@
   "span": [0, 8],
   "position": 0,
   "terms": [
-    {"value": "ne^tstat", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"]},
-    {"value": "netstat", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"]},
-    {"value": "ne", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]},
-    {"value": "tstat", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]}
+    {"value": "ne^tstat", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"], "noise": false},
+    {"value": "netstat", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"], "noise": false},
+    {"value": "ne", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false},
+    {"value": "tstat", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false}
   ]
 }
 ```
@@ -63,6 +63,7 @@
 | `value` | 非空搜索词 |
 | `kind` | `original`、`casefold`、`alias`、`subword` 之一 |
 | `rules` | 产生该值的全部规则 ID，按首次贡献顺序排列，不重复 |
+| `noise` | 布尔。该词项所在片段完全落在高置信字符码区域内（`N-NOISE-001`）。**词项照常输出**，降权交给消费方；同一片段的词项此位一致，且噪声片段不再产生 `subword` |
 
 - 同一 Token 内相同 `value` 只出现一次：`kind` 取首个来源，`rules` 合并所有来源。
   因此 `netstat.exe` 的原始词同时带有 `N-BASE-001` 和 `N-CASEFOLD-001`，表示折叠后值不变。
@@ -126,13 +127,15 @@
 | `parent_view_id` | 父视图 ID；`null` 表示直接来自原文 |
 | `depth` | 解码层数，直接来自原文为 1；不超过 `max_decode_depth` |
 | `source_span` | 被解码的候选在**父层文本**中的区间 |
-| `source_kind` | 候选来源：`token`（基础片段，去除两端引号）、`kv_value`（`name=value` 的值）、`group`（引号内容） |
-| `candidate_rule` | 候选来源规则：`C-TOKEN-001`、`C-KV-001`、`C-GROUP-001` |
-| `rule` | 解码规则：`D-B64-001`、`D-B64URL-001`、`D-PCT-001`、`D-ESC-X-001`、`D-ESC-U-001` |
-| `encoding` | `base64`、`base64url`、`percent`、`hex_escape`、`unicode_escape` |
-| `charset` | 字节解释方式：`utf-8`、`utf-16le`；`unicode_escape` 为 `utf-16`（代码单元） |
+| `source_kind` | 候选来源：`token`（基础片段，去除两端引号）、`kv_value`（`name=value` 的值）、`group`（引号内容）、`charcode_region`（跨片段的字符码区域） |
+| `candidate_rule` | 候选来源规则：`C-TOKEN-001`、`C-KV-001`、`C-GROUP-001`、`C-CHARCODE-001` |
+| `rule` | 解码规则：`D-B64-001`、`D-B64URL-001`、`D-PCT-001`、`D-ESC-X-001`、`D-ESC-U-001`、`D-CHARCODE-001`、`D-CONCAT-001` |
+| `encoding` | `base64`、`base64url`、`percent`、`hex_escape`、`unicode_escape`、`charcode-decimal`、`concat` |
+| `charset` | 字节解释方式：`utf-8`、`utf-16le`；`unicode_escape` 为 `utf-16`（代码单元）；`charcode-decimal` 为 `ascii-decimal`；`concat` 为 `text` |
 | `status` | `complete`：已观察载荷全部解码；`partial`：末尾有不完整单元，只保留可确定的前缀 |
-| `hint` | 候选紧跟在 `-EncodedCommand` / `-enc` 之后时为 `C-HINT-ENC-001`，否则为 `null` |
+| `hint` | 候选紧跟在 `-EncodedCommand` / `-enc` 之后时为 `C-HINT-ENC-001`；字符码区域附近有上下文证据时为 `C-HINT-CHARCODE-001`；否则为 `null` |
+| `confidence` | `high`、`medium`、`low`。除 `charcode-decimal` 外恒为 `high`。**低置信视图照常输出**，由消费方按需过滤；分级条件见 RULES.md 的 D-CHARCODE-001 |
+| `evidence` | 字符串数组，`C-HINT-CHARCODE-001` 命中的上下文特征（如 `["-join","[char","char[]"]`），按固定顺序。非空时 `confidence` 必为 `high`——**证据优先于形态** |
 | `mapping` | 固定为 `range`，只有整段区间映射 |
 | `text` | 解码得到的候选文本，非空 |
 | `tokens` / `groups` / `symbols` | 对 `text` 重新运行相同的扫描与搜索词规则，坐标相对 `text` |
@@ -168,6 +171,8 @@
 | `UNCLOSED_QUOTE` | info | 引号到扫描末尾仍未闭合 | `{}` |
 | `DECODE_PARTIAL` | info | 解码视图的 `status` 为 `partial`；`view_id`/`span` 指向候选所在的父层 | `decoded_view_id`、`rule` |
 | `DECODE_FAILED` | warning | 值得报告的候选解码失败（见 RULES.md 各解码规则的"失败报告"） | `rule`、`reason` |
+| `OBFUSCATION_SUSPECTED` | warning | `processing.obfuscation.triggered` 非空。度量是**描述性的，不是恶意评分**；`view_id`/`span` 均为 `null` | `rule`（`M-OBFUS-001`）加全部五项度量与 `triggered` |
+| `OBFUSCATED_SLICE` | warning | 对环境/自动变量做下标切片并 `-join`；**只标记，不还原取值** | `rule`（`M-SLICE-001`）、`variable`、`indices` |
 | `LIMIT_REACHED` | limit | 某项资源上限被触发，结果不完整 | `limit`（选项名）、`value`（上限值）、`count`（触发次数） |
 
 - 通知都**不是**整条记录的失败。输入不符合 Shell 语法本身不产生错误。
@@ -184,7 +189,7 @@
 
 ```json
 {
-  "rules_version": "1.0.0",
+  "rules_version": "1.1.0",
   "input_length": 29,
   "scanned_span": [0, 29],
   "scan_complete": true,
@@ -192,7 +197,9 @@
   "limited": false,
   "limits": [],
   "stats": {"tokens": 4, "groups": 1, "symbols": 1, "output_items": 6,
-            "decode_attempts": 0, "decoded_views": 0, "decoded_bytes": 0}
+            "decode_attempts": 0, "decoded_views": 0, "decoded_bytes": 0},
+  "obfuscation": {"symbol_ratio": 0.2, "case_toggles": 0, "charcode_coverage": 0.0,
+                  "quote_chars": 1, "concat_segments": 0, "triggered": []}
 }
 ```
 
@@ -210,6 +217,21 @@
 | `stats.decode_attempts` | 实际执行的解码尝试次数 |
 | `stats.decoded_views` | 解码视图数 |
 | `stats.decoded_bytes` | 解码视图累计字节数（`unicode_escape` 按 UTF-8 长度计） |
+| `obfuscation` | `M-OBFUS-001` 的度量对象，见下表。恒定存在，不受 `decode` 开关影响 |
+
+`processing.obfuscation` 的六个键恒定存在：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `symbol_ratio` | number | 符号片段占（片段 + 符号）的比例，0–1，保留 4 位小数。**只度量原文** |
+| `case_toggles` | int | 短词（长度 ≤ 24 的 `\w+`）内部相邻字母的大小写翻转次数。**只度量原文** |
+| `charcode_coverage` | number | 高置信字符码区域覆盖的字符占比，0–1，保留 4 位小数。**只度量原文** |
+| `quote_chars` | int | ASCII 单双引号的个数。**只度量原文** |
+| `concat_segments` | int | `D-CONCAT-001` 命中的候选数。**跨层累计**——字面量拼接通常只在解码之后才出现 |
+| `triggered` | array | 越过阈值的度量名，是前五个键的子集。非空时产生一条 `OBFUSCATION_SUSPECTED` |
+
+这些是"这条记录是怎么写的"的客观描述，**不是恶意评分**，也不参与任何拦截决策。
+阈值与两条防误报护栏见 RULES.md 的 M-OBFUS-001。
 
 ## 9. 资源上限（`AnalyzerOptions`）
 
@@ -217,8 +239,9 @@
 |---|---:|---|
 | `decode` | `True` | 关闭后不生成解码视图 |
 | `subwords` | `True` | 关闭后不生成 `subword` 词项 |
+| `noise_suppression` | `True` | 关闭后高置信字符码区域内的片段照常产生子词，`noise` 恒为 `false` |
 | `max_scan_chars` | 1,048,576 | 只扫描前缀，`scan_complete=false`；`raw` 仍为完整原文 |
-| `max_decode_depth` | 2 | 更深层的候选不再解码 |
+| `max_decode_depth` | 3 | 更深层的候选不再解码。三层是"外壳编码 → 字符码 → 字面量拼接"这类真实投递的常见深度 |
 | `max_decode_attempts` | 64 | 后续候选不再尝试 |
 | `max_candidate_chars` | 65,536 | 超长候选不尝试解码 |
 | `max_decoded_views` | 16 | 不再生成新视图 |
@@ -226,6 +249,11 @@
 | `max_terms_per_token` | 32 | 该 Token 的后续词项被丢弃 |
 | `max_output_items` | 100,000 | 停止输出后续 Token、分组、符号（所有层共享） |
 | `max_notices` | 100 | 后续普通通知被丢弃 |
+| `obfuscation_symbol_percent` | 35 | `symbol_ratio` 的触发阈值（百分比，0–100） |
+| `obfuscation_case_toggles` | 20 | `case_toggles` 的触发阈值（次数） |
+| `obfuscation_charcode_percent` | 50 | `charcode_coverage` 的触发阈值（百分比，0–100） |
+| `obfuscation_quote_chars` | 16 | `quote_chars` 的触发阈值（个数） |
+| `obfuscation_concat_segments` | 4 | `concat_segments` 的触发阈值（段数） |
 
 所有上限都是非负整数；类型错误抛出 `TypeError`，负数抛出 `ValueError`。
 上限被触发时返回已完成的结果并在 `processing.limits` 与 `LIMIT_REACHED` 中说明，
@@ -243,24 +271,24 @@ ne^tstat -ano | fi^ndstr "443
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "raw": "ne^tstat -ano | fi^ndstr \"443",
   "tokens": [
     {"raw": "ne^tstat", "span": [0, 8], "position": 0, "terms": [
-      {"value": "ne^tstat", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"]},
-      {"value": "netstat", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"]},
-      {"value": "ne", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]},
-      {"value": "tstat", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]}]},
+      {"value": "ne^tstat", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"], "noise": false},
+      {"value": "netstat", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"], "noise": false},
+      {"value": "ne", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false},
+      {"value": "tstat", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false}]},
     {"raw": "-ano", "span": [9, 13], "position": 1, "terms": [
-      {"value": "-ano", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"]},
-      {"value": "ano", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]}]},
+      {"value": "-ano", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"], "noise": false},
+      {"value": "ano", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false}]},
     {"raw": "fi^ndstr", "span": [16, 24], "position": 2, "terms": [
-      {"value": "fi^ndstr", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"]},
-      {"value": "findstr", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"]},
-      {"value": "fi", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]},
-      {"value": "ndstr", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"]}]},
+      {"value": "fi^ndstr", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001"], "noise": false},
+      {"value": "findstr", "kind": "alias", "rules": ["N-DEOBF-001", "N-CASEFOLD-001", "N-SUBWORD-001"], "noise": false},
+      {"value": "fi", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false},
+      {"value": "ndstr", "kind": "subword", "rules": ["N-SUBWORD-001", "N-CASEFOLD-001"], "noise": false}]},
     {"raw": "\"443", "span": [25, 29], "position": 3, "terms": [
-      {"value": "443", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001", "N-SUBWORD-001"]}]}
+      {"value": "443", "kind": "original", "rules": ["N-BASE-001", "N-CASEFOLD-001", "N-SUBWORD-001"], "noise": false}]}
   ],
   "groups": [
     {"raw": "\"443", "span": [25, 29], "quote": "\"", "content": "443",
@@ -274,10 +302,12 @@ ne^tstat -ano | fi^ndstr "443
      "view_id": null, "span": [25, 29], "details": {}}
   ],
   "processing": {
-    "rules_version": "1.0.0", "input_length": 29, "scanned_span": [0, 29],
+    "rules_version": "1.1.0", "input_length": 29, "scanned_span": [0, 29],
     "scan_complete": true, "decode_enabled": true, "limited": false, "limits": [],
     "stats": {"tokens": 4, "groups": 1, "symbols": 1, "output_items": 6,
-              "decode_attempts": 0, "decoded_views": 0, "decoded_bytes": 0}
+              "decode_attempts": 0, "decoded_views": 0, "decoded_bytes": 0},
+    "obfuscation": {"symbol_ratio": 0.2, "case_toggles": 0, "charcode_coverage": 0.0,
+                    "quote_chars": 1, "concat_segments": 0, "triggered": []}
   }
 }
 ```
@@ -306,3 +336,8 @@ ne^tstat -ano | fi^ndstr "443
 - 影响 JSON 结构（字段增删、类型或含义变化）时更新 `schema_version`。
 - 影响已有输出含义（规则行为、阈值、候选范围变化）时更新 `rules_version`，
   并在 RULES.md 中记录。
+
+| schema_version | 日期 | 变化 |
+|---|---|---|
+| `"1"` | 2026-09 | 首版 |
+| `"2"` | 2026-09 | 词项新增 `noise`；解码视图新增 `confidence`、`evidence`；`processing` 新增 `obfuscation` 对象 |

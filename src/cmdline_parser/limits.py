@@ -7,17 +7,23 @@ from typing import Any
 
 from .models import LEVEL_LIMIT, Notice, Span
 
-_SWITCHES = ("decode", "subwords")
+_SWITCHES = ("decode", "subwords", "noise_suppression")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AnalyzerOptions:
-    """分析开关与资源上限。所有上限均为非负整数。"""
+    """分析开关与资源上限。
+
+    开关为布尔；上限为非负整数；``*_percent`` 系列为百分比阈值（0–100 的整数），
+    用整数而不是浮点是为了让整份选项保持"只能是 int 或 bool"这一条简单约定。
+    """
 
     decode: bool = True
     subwords: bool = True
+    noise_suppression: bool = True
     max_scan_chars: int = 1_048_576
-    max_decode_depth: int = 2
+    # 三层是"外壳编码 → 字符码 → 字面量拼接"这类真实投递的常见深度。
+    max_decode_depth: int = 3
     max_decode_attempts: int = 64
     max_candidate_chars: int = 65_536
     max_decoded_views: int = 16
@@ -25,6 +31,12 @@ class AnalyzerOptions:
     max_terms_per_token: int = 32
     max_output_items: int = 100_000
     max_notices: int = 100
+    # M-OBFUS-001 阈值，全部未经真实日志验证，先给保守默认值。
+    obfuscation_symbol_percent: int = 35
+    obfuscation_case_toggles: int = 20
+    obfuscation_charcode_percent: int = 50
+    obfuscation_quote_chars: int = 16
+    obfuscation_concat_segments: int = 4
 
     def __post_init__(self) -> None:
         for item in fields(self):
@@ -37,6 +49,8 @@ class AnalyzerOptions:
                 raise TypeError(f"{item.name} must be int")
             if value < 0:
                 raise ValueError(f"{item.name} must be >= 0")
+            if item.name.endswith("_percent") and value > 100:
+                raise ValueError(f"{item.name} must be <= 100")
 
 
 @dataclass(slots=True)
