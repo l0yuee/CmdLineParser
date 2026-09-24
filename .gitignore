@@ -1,0 +1,15 @@
+plans/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv-*/
+.venv314/
+.conda-py311/
+.tools/
+build/
+dist/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
